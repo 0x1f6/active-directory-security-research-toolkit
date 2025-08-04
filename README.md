@@ -298,6 +298,10 @@ Download these from [Microsoft Learn](https://learn.microsoft.com/en-us/openspec
 5. Update documentation
 6. Submit a pull request
 
+## Development
+
+This tool was developed with assistance from [Claude](https://claude.ai) by Anthropic.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
