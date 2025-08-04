@@ -1,6 +1,6 @@
-# Security Research Toolkit
+# Active Directory Security Research Toolkit
 
-A defensive security research toolkit focused on Active Directory schema analysis and attribute mapping.
+A defensive security research toolkit focused on Active Directory.
 
 ## Overview
 
@@ -37,7 +37,7 @@ Complete CLI tool for working with Active Directory schema attribute mappings:
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd security-research-toolkit
+cd active-directory-security-research-toolkit
 
 # Install dependencies
 uv sync
@@ -172,7 +172,7 @@ Example enhanced attribute entry:
 Uses **src-layout** for clean package organization:
 
 ```
-security-research-toolkit/
+active-directory-security-research-toolkit/
 ├── src/ad_schema_tool/             # Main Python package
 │   └── cli.py                      # CLI interface
 ├── scripts/                        # Development tools

@@ -1,5 +1,5 @@
 [project]
-name = "security-research-toolkit"
+name = "active-directory-security-research-toolkit"
 version = "0.1.0"
 description = "Security research toolkit for Active Directory schema analysis and attribute mapping"
 readme = "README.md"

@@ -15,7 +15,7 @@ Guide for developing and maintaining the AD Schema Mapping Tool.
 ```bash
 # Clone repository
 git clone <repository-url>
-cd security-research-toolkit
+cd active-directory-security-research-toolkit
 
 # Install dependencies
 uv sync
@@ -194,7 +194,7 @@ The parser automatically converts:
 ### Current Clean Structure
 
 ```
-security-research-toolkit/
+active-directory-security-research-toolkit/
 ├── src/ad_schema_tool/             # Main Python package
 │   ├── __init__.py
 │   └── cli.py                      # CLI interface (loads JSON directly)
