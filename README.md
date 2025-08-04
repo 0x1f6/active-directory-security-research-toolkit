@@ -51,6 +51,10 @@ uv pip install -e .
 ### Quick Start
 
 1. **Download Microsoft PDF documents** (MS-ADA1, MS-ADA2, MS-ADA3) from Microsoft Learn
+  - [MS-ADA1](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-ada1/)
+  - [MS-ADA2](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-ada2/)
+  - [MS-ADA3](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-ada3/)
+
 2. **Build your schema database:**
    ```bash
    ad-schema-tool build-schema ms-ada1.pdf ms-ada2.pdf ms-ada3.pdf --stats
