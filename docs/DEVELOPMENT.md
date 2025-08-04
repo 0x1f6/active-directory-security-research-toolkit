@@ -14,7 +14,7 @@ Guide for developing and maintaining the AD Schema Mapping Tool.
 
 ```bash
 # Clone repository
-git clone <repository-url>
+git clone https://github.com/0x1f6/active-directory-security-research-toolkit.git
 cd active-directory-security-research-toolkit
 
 # Install dependencies
