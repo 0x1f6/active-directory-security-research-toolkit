@@ -5,7 +5,6 @@ docs/notes/
 docs/specs/*.pdf
 
 # PDF parsing workflow
-ad_schema_enhanced.json
 ad_schema_from_pdfs.json
 ad_schema_*.json.backup
 *.json.bck

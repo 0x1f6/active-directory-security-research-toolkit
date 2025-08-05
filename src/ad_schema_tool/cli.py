@@ -363,12 +363,8 @@ def intersect_files(
     output_file: Optional[Path] = None,
 ) -> None:
     """Find intersection of GUIDs across multiple text files.
-
-    Args:
-        lookup: Schema lookup instance
-        file_paths: List of text files containing GUIDs (one per line)
-        annotate: Whether to show attribute names alongside GUIDs
-        output_file: Optional file to write results to
+    
+    This is a wrapper around subset_analysis for backward compatibility.
     """
     if len(file_paths) < 2:
         if _PLAIN_OUTPUT:
@@ -376,24 +372,278 @@ def intersect_files(
         else:
             print_error("Need at least 2 files for intersection")
         sys.exit(1)
+    
+    # Use subset_analysis with include_all (intersection logic)
+    subset_analysis(
+        lookup=lookup,
+        include_all=file_paths,
+        annotate=annotate,
+        output_file=output_file,
+        operation_name="GUID Intersection"
+    )
 
-    # Read GUIDs from each file
-    file_sets = []
-    file_names = []
 
-    for file_path in file_paths:
+def annotate_file(
+    lookup: SchemaLookup,
+    input_file: Path,
+    output_file: Optional[Path] = None,
+) -> None:
+    """Annotate a file containing GUIDs by adding attribute names.
+    
+    Args:
+        lookup: Schema lookup instance
+        input_file: Input file containing GUIDs (one per line)
+        output_file: Optional output file, if None writes to stdout
+    """
+    try:
+        with open(input_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        if _PLAIN_OUTPUT:
+            print(f"ERROR: Input file not found: {input_file}", file=sys.stderr)
+        else:
+            print_error(f"Input file not found: {colorize(str(input_file), Colors.CYAN)}")
+        sys.exit(1)
+    except OSError as e:
+        if _PLAIN_OUTPUT:
+            print(f"ERROR: Cannot read input file {input_file}: {e}", file=sys.stderr)
+        else:
+            print_error(f"Cannot read input file {colorize(str(input_file), Colors.CYAN)}: {e}")
+        sys.exit(1)
+
+    # Process lines and build output
+    output_lines = []
+    found_count = 0
+    total_count = 0
+    
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("#"):  # Skip empty lines and comments
+            total_count += 1
+            normalized_guid = normalize_guid(line)
+            attribute_name = lookup.lookup_by_guid(normalized_guid)
+            
+            if attribute_name:
+                output_lines.append(f"{normalized_guid}\t{attribute_name}")
+                found_count += 1
+            else:
+                output_lines.append(f"{normalized_guid}\tUnknown")
+        elif line:  # Keep comments and empty lines as-is
+            output_lines.append(line)
+    
+    # Write output
+    if output_file:
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                for line in output_lines:
+                    f.write(f"{line}\n")
+            
+            if _PLAIN_OUTPUT:
+                print(f"Annotated {found_count}/{total_count} GUIDs, wrote to {output_file}")
+            else:
+                print_success(
+                    f"Annotated {format_count(found_count)}/{format_count(total_count)} GUIDs, "
+                    f"wrote to {colorize(str(output_file), Colors.CYAN)}"
+                )
+                
+        except OSError as e:
+            if _PLAIN_OUTPUT:
+                print(f"ERROR: Failed to write output file: {e}", file=sys.stderr)
+            else:
+                print_error(f"Failed to write output file: {e}")
+            sys.exit(1)
+    else:
+        # Write to stdout
+        for line in output_lines:
+            print(line)
+        
+        # Show stats to stderr if not in plain mode
+        if not _PLAIN_OUTPUT:
+            print_info(f"Annotated {format_count(found_count)}/{format_count(total_count)} GUIDs")
+
+
+def unique_elements(
+    lookup: SchemaLookup,
+    file_paths: list[Path],
+    annotate: bool = False,
+    output_file: Optional[Path] = None,
+) -> None:
+    """Find elements that are unique to each file (set difference analysis).
+    
+    This function performs multiple subset analyses to find elements unique to each file.
+    """
+    if len(file_paths) < 2:
+        if _PLAIN_OUTPUT:
+            print("ERROR: Need at least 2 files for unique analysis", file=sys.stderr)
+        else:
+            print_error("Need at least 2 files for unique analysis")
+        sys.exit(1)
+
+    # Collect results for each file
+    all_unique_results = []
+    total_unique = 0
+    
+    for i, current_file in enumerate(file_paths):
+        # Get all other files to exclude
+        other_files = [file_paths[j] for j in range(len(file_paths)) if j != i]
+        
+        # Use subset_analysis to find elements unique to current file
+        # We'll capture the results by temporarily redirecting to a temp approach
+        # For now, let's use the original logic but simplified
+        
+        try:
+            with open(current_file, "r", encoding="utf-8") as f:
+                current_guids = set()
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        normalized_guid = normalize_guid(line)
+                        current_guids.add(normalized_guid)
+        except FileNotFoundError:
+            if _PLAIN_OUTPUT:
+                print(f"ERROR: File not found: {current_file}", file=sys.stderr)
+            else:
+                print_error(f"File not found: {colorize(str(current_file), Colors.CYAN)}")
+            sys.exit(1)
+        except OSError as e:
+            if _PLAIN_OUTPUT:
+                print(f"ERROR: Cannot read file {current_file}: {e}", file=sys.stderr)
+            else:
+                print_error(f"Cannot read file {colorize(str(current_file), Colors.CYAN)}: {e}")
+            sys.exit(1)
+        
+        # Get union of all other files
+        other_guids = set()
+        for other_file in other_files:
+            try:
+                with open(other_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            normalized_guid = normalize_guid(line)
+                            other_guids.add(normalized_guid)
+            except (FileNotFoundError, OSError):
+                continue  # Error handling was done above
+        
+        # Find unique elements
+        unique_to_current = current_guids - other_guids
+        if unique_to_current:
+            all_unique_results.append((current_file.name, unique_to_current))
+            total_unique += len(unique_to_current)
+
+    # Generate output
+    if total_unique == 0:
+        if not output_file:
+            if _PLAIN_OUTPUT:
+                print("No unique GUIDs found in any file", file=sys.stderr)
+            else:
+                print_error("No unique GUIDs found in any file")
+        return
+
+    # Prepare output lines
+    output_lines = []
+    if output_file or _PLAIN_OUTPUT:
+        # File/plain format
+        for file_name, unique_guids in all_unique_results:
+            output_lines.append(f"# Elements unique to {file_name} ({len(unique_guids)} items)")
+            for guid in sorted(unique_guids):
+                if annotate:
+                    name = lookup.lookup_by_guid(guid) or "Unknown"
+                    output_lines.append(f"{guid}\t{name}")
+                else:
+                    output_lines.append(guid)
+            output_lines.append("")  # Empty line between sections
+
+    # Write to file if specified
+    if output_file:
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                for line in output_lines:
+                    f.write(f"{line}\n")
+
+            if _PLAIN_OUTPUT:
+                print(f"Wrote {total_unique} unique GUIDs to {output_file}")
+            else:
+                print_success(
+                    f"Wrote {format_count(total_unique)} unique GUIDs to {colorize(str(output_file), Colors.CYAN)}"
+                )
+
+        except OSError as e:
+            if _PLAIN_OUTPUT:
+                print(f"ERROR: Failed to write output file: {e}", file=sys.stderr)
+            else:
+                print_error(f"Failed to write output file: {e}")
+            sys.exit(1)
+
+    # Console output
+    if _PLAIN_OUTPUT and not output_file:
+        for line in output_lines:
+            print(line)
+    elif not output_file:  # Fancy output
+        print_header(
+            "🔍 Unique GUID Analysis",
+            f"Found {format_count(total_unique)} unique GUIDs across {len(file_paths)} files",
+        )
+
+        # Show results per file
+        for file_name, unique_guids in all_unique_results:
+            print(colorize(f"Elements unique to {file_name} ({len(unique_guids)} items):", Colors.BOLD))
+            for i, guid in enumerate(sorted(unique_guids), 1):
+                if annotate:
+                    name = lookup.lookup_by_guid(guid) or "Unknown"
+                    print(
+                        f"  {colorize(f'{i:3}.', Colors.GRAY)} {format_guid(guid)} {colorize('→', Colors.DIM)} {format_attribute_name(name)}"
+                    )
+                else:
+                    print(f"  {colorize(f'{i:3}.', Colors.GRAY)} {format_guid(guid)}")
+            print()
+
+
+def subset_analysis(
+    lookup: SchemaLookup,
+    include_all: Optional[List[Path]] = None,
+    include_any: Optional[List[Path]] = None,
+    exclude: Optional[List[Path]] = None,
+    annotate: bool = False,
+    output_file: Optional[Path] = None,
+    operation_name: str = "Subset Analysis",
+) -> None:
+    """Universal set analysis function supporting include/exclude operations.
+    
+    Args:
+        lookup: Schema lookup instance
+        include_all: Files where GUIDs must be present in ALL (intersection)
+        include_any: Files where GUIDs must be present in ANY (union)  
+        exclude: Files where GUIDs must NOT be present
+        annotate: Whether to show attribute names alongside GUIDs
+        output_file: Optional file to write results to
+        operation_name: Name for headers/output (e.g. "Intersection", "Unique Analysis")
+    """
+    include_all = include_all or []
+    include_any = include_any or []
+    exclude = exclude or []
+    
+    all_files = include_all + include_any + exclude
+    if len(all_files) < 1:
+        if _PLAIN_OUTPUT:
+            print("ERROR: Need at least 1 file for analysis", file=sys.stderr)
+        else:
+            print_error("Need at least 1 file for analysis")
+        sys.exit(1)
+
+    # Read GUIDs from all files
+    file_data = {}  # filename -> set of GUIDs
+    
+    for file_path in all_files:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 guids = set()
                 for line in f:
                     line = line.strip()
-                    if line and not line.startswith(
-                        "#"
-                    ):  # Skip empty lines and comments
+                    if line and not line.startswith("#"):  # Skip empty lines and comments
                         normalized_guid = normalize_guid(line)
                         guids.add(normalized_guid)
-                file_sets.append(guids)
-                file_names.append(file_path.name)
+                file_data[file_path.name] = guids
 
         except FileNotFoundError:
             if _PLAIN_OUTPUT:
@@ -405,51 +655,74 @@ def intersect_files(
             if _PLAIN_OUTPUT:
                 print(f"ERROR: Cannot read file {file_path}: {e}", file=sys.stderr)
             else:
-                print_error(
-                    f"Cannot read file {colorize(str(file_path), Colors.CYAN)}: {e}"
-                )
+                print_error(f"Cannot read file {colorize(str(file_path), Colors.CYAN)}: {e}")
             sys.exit(1)
 
-    # Find intersection
-    intersection = file_sets[0]
-    for guid_set in file_sets[1:]:
-        intersection = intersection.intersection(guid_set)
+    # Build include set
+    include_set = set()
+    
+    if include_all:
+        # Intersection: must be in ALL include_all files
+        include_set = file_data[include_all[0].name].copy()
+        for file_path in include_all[1:]:
+            include_set = include_set.intersection(file_data[file_path.name])
+    
+    if include_any:
+        # Union: must be in ANY include_any files
+        any_set = set()
+        for file_path in include_any:
+            any_set = any_set.union(file_data[file_path.name])
+        
+        if include_all:
+            # Both include_all and include_any: intersection of (include_all result) and (include_any union)
+            include_set = include_set.intersection(any_set)
+        else:
+            # Only include_any: just the union
+            include_set = any_set
+    
+    # Build exclude set (union of all exclude files)
+    exclude_set = set()
+    for file_path in exclude:
+        exclude_set = exclude_set.union(file_data[file_path.name])
+    
+    # Final result: include_set - exclude_set
+    result_set = include_set - exclude_set
 
-    # Prepare output lines
-    output_lines = []
-    if not intersection:
-        if not output_file:  # Only print to stderr if not writing to file
+    # Prepare output
+    if not result_set:
+        if not output_file:
             if _PLAIN_OUTPUT:
-                print("No common GUIDs found", file=sys.stderr)
+                print("No GUIDs found matching criteria", file=sys.stderr)
             else:
-                print_error("No common GUIDs found across all files")
+                print_error("No GUIDs found matching the specified criteria")
         return
 
     # Generate output content
-    for guid in sorted(intersection):
-        if annotate:
-            name = lookup.lookup_by_guid(guid) or "Unknown"
-            if output_file or _PLAIN_OUTPUT:
+    output_lines = []
+    if output_file or _PLAIN_OUTPUT:
+        # Simple format for files and plain output
+        for guid in sorted(result_set):
+            if annotate:
+                name = lookup.lookup_by_guid(guid) or "Unknown"
                 output_lines.append(f"{guid}\t{name}")
             else:
-                output_lines.append((guid, name))  # Tuple for fancy console output
-        else:
-            output_lines.append(guid)
+                output_lines.append(guid)
+    else:
+        # Store for fancy console output  
+        output_lines = [(guid, lookup.lookup_by_guid(guid) or "Unknown") for guid in sorted(result_set)]
 
     # Write to file if specified
     if output_file:
         try:
             with open(output_file, "w", encoding="utf-8") as f:
-                if annotate:
-                    f.write("GUID\tAttributeName\n")  # Header for annotated output
                 for line in output_lines:
                     f.write(f"{line}\n")
 
             if _PLAIN_OUTPUT:
-                print(f"Wrote {len(intersection)} common GUIDs to {output_file}")
+                print(f"Wrote {len(result_set)} GUIDs to {output_file}")
             else:
                 print_success(
-                    f"Wrote {format_count(len(intersection))} common GUIDs to {colorize(str(output_file), Colors.CYAN)}"
+                    f"Wrote {format_count(len(result_set))} GUIDs to {colorize(str(output_file), Colors.CYAN)}"
                 )
 
         except OSError as e:
@@ -465,19 +738,24 @@ def intersect_files(
             print(line)
     elif not output_file:  # Fancy output only when not writing to file
         print_header(
-            "🔍 GUID Intersection Results",
-            f"Found {format_count(len(intersection))} common GUIDs across {len(file_paths)} files",
+            f"🔍 {operation_name} Results",
+            f"Found {format_count(len(result_set))} GUIDs matching criteria",
         )
 
-        # Show file info
-        print(colorize("Files analyzed:", Colors.DIM))
-        for i, name in enumerate(file_names, 1):
-            print(
-                f"  {colorize(f'{i}.', Colors.GRAY)} {colorize(name, Colors.CYAN)} ({format_count(len(file_sets[i - 1]))} GUIDs)"
-            )
+        # Show operation details
+        print(colorize("Operation:", Colors.DIM))
+        if include_all:
+            file_names = [f.name for f in include_all]
+            print(f"  Include (ALL): {', '.join(file_names)}")
+        if include_any:
+            file_names = [f.name for f in include_any]  
+            print(f"  Include (ANY): {', '.join(file_names)}")
+        if exclude:
+            file_names = [f.name for f in exclude]
+            print(f"  Exclude: {', '.join(file_names)}")
         print()
 
-        # Show intersection results
+        # Show results
         for i, item in enumerate(output_lines, 1):
             if annotate:
                 guid, name = item
@@ -485,7 +763,12 @@ def intersect_files(
                     f"  {colorize(f'{i:3}.', Colors.GRAY)} {format_guid(guid)} {colorize('→', Colors.DIM)} {format_attribute_name(name)}"
                 )
             else:
-                print(f"  {colorize(f'{i:3}.', Colors.GRAY)} {format_guid(item)}")
+                guid, name = item
+                print(f"  {colorize(f'{i:3}.', Colors.GRAY)} {format_guid(guid)}")
+
+            # Add spacing every 5 items for readability
+            if i % 5 == 0 and i < len(output_lines):
+                print()
 
 
 def list_all(lookup: SchemaLookup) -> None:
@@ -592,6 +875,15 @@ def main() -> None:
   # Write intersection results to file
   ad-schema-tool intersect --output results.txt file1.txt file2.txt
   
+  # Annotate a file with GUIDs by adding attribute names
+  ad-schema-tool annotate guids.txt --output annotated.txt
+  
+  # Find GUIDs that are unique to each file
+  ad-schema-tool unique file1.txt file2.txt file3.txt --output unique_analysis.txt
+  
+  # Advanced set operations: GUIDs in A and B, but not in C
+  ad-schema-tool subset --include fileA.txt fileB.txt --exclude fileC.txt
+  
   # List all attributes with plain output
   ad-schema-tool --plain list
 """,
@@ -654,6 +946,66 @@ def main() -> None:
         help="Show attribute names alongside GUIDs",
     )
     intersect_parser.add_argument(
+        "--output", "-o", type=Path, help="Write results to file instead of console"
+    )
+
+    # Annotate command
+    annotate_parser = subparsers.add_parser(
+        "annotate", help="Annotate a file containing GUIDs by adding attribute names"
+    )
+    annotate_parser.add_argument(
+        "input_file", type=Path, help="Input file containing GUIDs (one per line)"
+    )
+    annotate_parser.add_argument(
+        "--output", "-o", type=Path, help="Output file for annotated results (default: stdout)"
+    )
+
+    # Unique elements command
+    unique_parser = subparsers.add_parser(
+        "unique", help="Find GUIDs that are unique to each input file"
+    )
+    unique_parser.add_argument(
+        "files", nargs="+", type=Path, help="Text files containing GUIDs (one per line)"
+    )
+    unique_parser.add_argument(
+        "--annotate",
+        "-a",
+        action="store_true",
+        help="Show attribute names alongside GUIDs",
+    )
+    unique_parser.add_argument(
+        "--output", "-o", type=Path, help="Write results to file instead of console"
+    )
+
+    # Subset analysis command  
+    subset_parser = subparsers.add_parser(
+        "subset", help="Advanced set operations with include/exclude logic"
+    )
+    subset_parser.add_argument(
+        "--include",
+        nargs="+",
+        type=Path,
+        help="Files where GUIDs must be present in ALL (intersection)",
+    )
+    subset_parser.add_argument(
+        "--include-any", 
+        nargs="+",
+        type=Path,
+        help="Files where GUIDs must be present in ANY (union)",
+    )
+    subset_parser.add_argument(
+        "--exclude",
+        nargs="+", 
+        type=Path,
+        help="Files where GUIDs must NOT be present",
+    )
+    subset_parser.add_argument(
+        "--annotate",
+        "-a",
+        action="store_true",
+        help="Show attribute names alongside GUIDs",
+    )
+    subset_parser.add_argument(
         "--output", "-o", type=Path, help="Write results to file instead of console"
     )
 
@@ -722,6 +1074,28 @@ def main() -> None:
         list_all(lookup)
     elif args.command == "intersect":
         intersect_files(lookup, args.files, args.annotate, args.output)
+    elif args.command == "annotate":
+        annotate_file(lookup, args.input_file, args.output)
+    elif args.command == "unique":
+        unique_elements(lookup, args.files, args.annotate, args.output)
+    elif args.command == "subset":
+        # Validate that at least one include option is provided
+        if not args.include and not args.include_any:
+            if _PLAIN_OUTPUT:
+                print("ERROR: Must specify at least one of --include or --include-any", file=sys.stderr)
+            else:
+                print_error("Must specify at least one of --include or --include-any")
+            sys.exit(1)
+        
+        subset_analysis(
+            lookup=lookup,
+            include_all=args.include,
+            include_any=args.include_any, 
+            exclude=args.exclude,
+            annotate=args.annotate,
+            output_file=args.output,
+            operation_name="Subset Analysis"
+        )
     elif args.command == "export":
         export_mappings(mappings, args.format, args.output)
 
