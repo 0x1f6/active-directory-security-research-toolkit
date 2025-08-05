@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 # ANSI Color codes for terminal output
@@ -37,6 +37,79 @@ class Colors:
 
 # Global flag for plain output mode
 _PLAIN_OUTPUT = False
+
+
+def normalize_guid(guid: str) -> str:
+    """Normalize GUID format by removing wrapping braces if present.
+    
+    Args:
+        guid: GUID string, optionally wrapped in braces
+        
+    Returns:
+        GUID string without braces
+        
+    Examples:
+        normalize_guid("{12345678-1234-5678-9012-123456789abc}") -> "12345678-1234-5678-9012-123456789abc"
+        normalize_guid("12345678-1234-5678-9012-123456789abc") -> "12345678-1234-5678-9012-123456789abc"
+    """
+    guid = guid.strip()
+    if guid.startswith('{') and guid.endswith('}'):
+        return guid[1:-1]
+    return guid
+
+
+class SchemaLookup:
+    """Centralized schema lookup functionality."""
+    
+    def __init__(self, mappings: Dict[str, str]):
+        self.guid_to_name = mappings
+        self._name_to_guid = None
+    
+    @property
+    def name_to_guid(self) -> Dict[str, str]:
+        """Lazy-build reverse mapping from name to GUID."""
+        if self._name_to_guid is None:
+            self._name_to_guid = {v: k for k, v in self.guid_to_name.items()}
+        return self._name_to_guid
+    
+    def lookup_by_guid(self, guid: str) -> Optional[str]:
+        """Look up attribute name by GUID.
+        
+        Args:
+            guid: GUID string (with or without braces)
+            
+        Returns:
+            Attribute name if found, None otherwise
+        """
+        normalized_guid = normalize_guid(guid)
+        return self.guid_to_name.get(normalized_guid)
+    
+    def lookup_by_name(self, name: str) -> Optional[str]:
+        """Look up GUID by attribute name.
+        
+        Args:
+            name: Attribute name
+            
+        Returns:
+            GUID string (without braces) if found, None otherwise
+        """
+        return self.name_to_guid.get(name)
+    
+    def search_by_pattern(self, pattern: str) -> List[Tuple[str, str]]:
+        """Search for attributes matching a pattern.
+        
+        Args:
+            pattern: Search pattern (case-insensitive)
+            
+        Returns:
+            List of (guid, name) tuples matching the pattern
+        """
+        pattern_lower = pattern.lower()
+        return [
+            (guid, name) 
+            for guid, name in self.guid_to_name.items() 
+            if pattern_lower in name.lower()
+        ]
 
 
 def set_plain_output(plain: bool) -> None:
@@ -178,28 +251,28 @@ def load_schema_mappings(json_file: Path) -> Dict[str, str]:
         sys.exit(1)
 
 
-def lookup_guid(mappings: Dict[str, str], guid: str) -> None:
+def lookup_guid(lookup: SchemaLookup, guid: str) -> None:
     """Look up attribute name for a GUID."""
-    name = mappings.get(guid)
+    normalized_guid = normalize_guid(guid)
+    name = lookup.lookup_by_guid(guid)
     if name:
         if _PLAIN_OUTPUT:
-            print(f"{guid}\t{name}")
+            print(f"{normalized_guid}\t{name}")
         else:
             print_header("🔍 GUID Lookup Result")
-            print(f"  GUID: {format_guid(guid)}")
+            print(f"  GUID: {format_guid(normalized_guid)}")
             print(f"  Name: {format_attribute_name(name)}")
     else:
         if _PLAIN_OUTPUT:
-            print(f"ERROR: GUID {guid} not found", file=sys.stderr)
+            print(f"ERROR: GUID {normalized_guid} not found", file=sys.stderr)
         else:
-            print_error(f"GUID {format_guid(guid)} not found in schema mappings")
+            print_error(f"GUID {format_guid(normalized_guid)} not found in schema mappings")
         sys.exit(1)
 
 
-def lookup_name(mappings: Dict[str, str], name: str) -> None:
+def lookup_name(lookup: SchemaLookup, name: str) -> None:
     """Look up GUID for an attribute name."""
-    reverse_mappings = {v: k for k, v in mappings.items()}
-    guid = reverse_mappings.get(name)
+    guid = lookup.lookup_by_name(name)
     if guid:
         if _PLAIN_OUTPUT:
             print(f"{name}\t{guid}")
@@ -217,12 +290,9 @@ def lookup_name(mappings: Dict[str, str], name: str) -> None:
         sys.exit(1)
 
 
-def search_pattern(mappings: Dict[str, str], pattern: str) -> None:
+def search_pattern(lookup: SchemaLookup, pattern: str) -> None:
     """Search for attributes matching a pattern."""
-    pattern_lower = pattern.lower()
-    matches = [
-        (guid, name) for guid, name in mappings.items() if pattern_lower in name.lower()
-    ]
+    matches = lookup.search_by_pattern(pattern)
 
     if matches:
         if _PLAIN_OUTPUT:
@@ -287,7 +357,7 @@ def search_pattern(mappings: Dict[str, str], pattern: str) -> None:
 
 
 def intersect_files(
-    mappings: Dict[str, str],
+    lookup: SchemaLookup,
     file_paths: list[Path],
     annotate: bool = False,
     output_file: Optional[Path] = None,
@@ -295,7 +365,7 @@ def intersect_files(
     """Find intersection of GUIDs across multiple text files.
 
     Args:
-        mappings: GUID to attribute name mappings
+        lookup: Schema lookup instance
         file_paths: List of text files containing GUIDs (one per line)
         annotate: Whether to show attribute names alongside GUIDs
         output_file: Optional file to write results to
@@ -320,7 +390,8 @@ def intersect_files(
                     if line and not line.startswith(
                         "#"
                     ):  # Skip empty lines and comments
-                        guids.add(line)
+                        normalized_guid = normalize_guid(line)
+                        guids.add(normalized_guid)
                 file_sets.append(guids)
                 file_names.append(file_path.name)
 
@@ -357,7 +428,7 @@ def intersect_files(
     # Generate output content
     for guid in sorted(intersection):
         if annotate:
-            name = mappings.get(guid, "Unknown")
+            name = lookup.lookup_by_guid(guid) or "Unknown"
             if output_file or _PLAIN_OUTPUT:
                 output_lines.append(f"{guid}\t{name}")
             else:
@@ -417,8 +488,9 @@ def intersect_files(
                 print(f"  {colorize(f'{i:3}.', Colors.GRAY)} {format_guid(item)}")
 
 
-def list_all(mappings: Dict[str, str]) -> None:
+def list_all(lookup: SchemaLookup) -> None:
     """List all schema attributes."""
+    mappings = lookup.guid_to_name
     if _PLAIN_OUTPUT:
         for guid, name in sorted(mappings.items(), key=lambda x: x[1]):
             print(f"{name}\t{guid}")
@@ -638,17 +710,18 @@ def main() -> None:
 
     # Load schema mappings from default file
     mappings = load_schema_mappings(args.schema_file)
+    lookup = SchemaLookup(mappings)
 
     if args.command == "lookup-guid":
-        lookup_guid(mappings, args.guid)
+        lookup_guid(lookup, args.guid)
     elif args.command == "lookup-name":
-        lookup_name(mappings, args.name)
+        lookup_name(lookup, args.name)
     elif args.command == "search":
-        search_pattern(mappings, args.pattern)
+        search_pattern(lookup, args.pattern)
     elif args.command == "list":
-        list_all(mappings)
+        list_all(lookup)
     elif args.command == "intersect":
-        intersect_files(mappings, args.files, args.annotate, args.output)
+        intersect_files(lookup, args.files, args.annotate, args.output)
     elif args.command == "export":
         export_mappings(mappings, args.format, args.output)
 
